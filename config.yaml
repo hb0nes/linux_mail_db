@@ -20,4 +20,4 @@ mail:
     - root.4.gz
     - root.5.gz
   tail: root
-
+mail_parsing_delay: 1 # seconds

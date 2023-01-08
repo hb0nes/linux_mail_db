@@ -29,6 +29,7 @@ pub struct Config {
     pub log: ConfigLogs,
     pub mail: ConfigMails,
     pub listen: ConfigListen,
+    pub mail_parsing_delay: u64,
 }
 
 impl Config {

@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
+use std::time::Duration;
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use log::{error, info, warn};
@@ -9,7 +10,7 @@ use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
-use tokio::task;
+use tokio::{task, time};
 use crate::{Config, FileTail};
 
 pub(crate) static MAIL_DB: Lazy<MailDB> = Lazy::new(|| {
@@ -246,7 +247,9 @@ pub async fn init_mail() -> Result<String> {
 
 /// tail the configured mail tail file (usually /var/mail/root) and update the
 /// in memory mail database with the subjects found.
-pub async fn tail_mail() -> Result<String> {
+/// Function needs a delay because the mail contents should be parsed some time after
+/// mails have been received to line them up to logfiles.
+pub async fn tail_mail(delay: Duration) -> Result<String> {
     let file_path = &format!("{}/{}", &Config::global().mail.dir, &Config::global().mail.tail);
     let (mut file_tail, mut rx_lines) = FileTail::new(&PathBuf::from(file_path))
         .with_context(|| format!("when tailing mail log file: {file_path}"))?;
@@ -258,8 +261,14 @@ pub async fn tail_mail() -> Result<String> {
                 let parse_res = parse_mail_subjects(reader).with_context(|| format!("parsing mail subjects for {file_path}"));
                 match parse_res {
                     Ok(mails_with_subjects) => {
-                        let updates = MAIL_DB.update_mail_subjects(mails_with_subjects);
-                        info!("Updated {updates} subjects from {file_path}");
+                        // Seeing as two files are being tailed simultaneously, there is a large chance that the DB isn't updated yet
+                        // for the new mail. Sleep for supplied duration
+                        let file_path = file_path.clone();
+                        task::spawn(async move {
+                            time::sleep(delay).await;
+                            let updates = MAIL_DB.update_mail_subjects(mails_with_subjects);
+                            info!("Updated {updates} subjects from {file_path}");
+                        });
                     }
                     Err(why) => error!("Encountered error {why} while parsing mail subjects from tailing: {file_path}"),
                 }

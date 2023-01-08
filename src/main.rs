@@ -1,6 +1,7 @@
 extern crate core;
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use anyhow::Result;
 use axum::Router;
@@ -42,7 +43,8 @@ async fn main() -> Result<()> {
     tasks.spawn(start_http());
     tasks.spawn(init_mail());
     tasks.spawn(tail_mail_log());
-    tasks.spawn(tail_mail());
+    #[allow(clippy::identity_op)]
+    tasks.spawn(tail_mail(Duration::from_secs(0 + &Config::global().mail_parsing_delay)));
     loop {
         select! {
             _ = tokio::signal::ctrl_c() => {
