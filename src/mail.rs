@@ -215,9 +215,8 @@ pub fn parse_mail_subjects(mut reader: FileLines) -> Result<Vec<Mail>> {
         // Don't execute rest of logic if we're not parsing the email
         // i.e. if we haven't encountered ESMTPS id
         if !parse_mail { continue; }
-        if to.is_empty() && line.starts_with("\tfor <") {
-            let split_1 = line.split('<').take(2).collect::<Vec<_>>()[1];
-            to = split_1.split('>').take(1).collect::<Vec<_>>()[0].to_string();
+        if to.is_empty() && line.starts_with("To: ") {
+            to = line.replace("To: ", "").replace(['<', '>'], "");
         }
         if subject.is_empty() && line.starts_with("Subject: ") {
             subject = line.replace("Subject: ", "");
