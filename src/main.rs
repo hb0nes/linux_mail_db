@@ -13,7 +13,7 @@ use tokio::task::JoinSet;
 
 use crate::config::{Config, read_config};
 use crate::endpoints::find_mail;
-use crate::mail::init_mail;
+use crate::mail::{init_mail, tail_mail, tail_mail_log};
 use crate::tail::FileTail;
 
 mod endpoints;
@@ -41,8 +41,8 @@ async fn main() -> Result<()> {
     let mut tasks = JoinSet::new();
     tasks.spawn(start_http());
     tasks.spawn(init_mail());
-    tasks.spawn(mail::tail_mail_log());
-    tasks.spawn(mail::tail_mail());
+    tasks.spawn(tail_mail_log());
+    tasks.spawn(tail_mail());
     loop {
         select! {
             _ = tokio::signal::ctrl_c() => {
