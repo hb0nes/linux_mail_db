@@ -69,6 +69,7 @@ pub struct Mail {
     id: String,
     pub line: Option<String>,
     pub subject: Option<String>,
+    #[serde(skip)]
     to: String,
 }
 
