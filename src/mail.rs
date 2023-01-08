@@ -238,7 +238,8 @@ pub fn parse_mail_subjects(mut reader: FileLines) -> Result<Vec<Mail>> {
 
 /// initialize in-memory mail database from configured mail paths
 pub async fn init_mail() -> Result<String> {
-    task::yield_now().await; // Yield to be able to cancel this task
+    task::yield_now().await;
+    // Yield to be able to cancel this task
     info!("Loading configured email into DB...");
     info!("inserted {} emails into mail DB", init_mail_log().await?);
     info!("inserted {} subjects into mail DB", init_mail_subjects().await?);
@@ -267,7 +268,7 @@ pub async fn tail_mail(delay: Duration) -> Result<String> {
                         task::spawn(async move {
                             time::sleep(delay).await;
                             let updates = MAIL_DB.update_mail_subjects(mails_with_subjects);
-                            info!("Updated {updates} subjects from {file_path}");
+                            if updates > 0 { info!("Updated {updates} subjects from {file_path}") };
                         });
                     }
                     Err(why) => error!("Encountered error {why} while parsing mail subjects from tailing: {file_path}"),
@@ -294,7 +295,7 @@ pub async fn tail_mail_log() -> Result<String> {
                 match parse_res {
                     Ok(mails) => {
                         let inserts = MAIL_DB.insert_mails(mails);
-                        info!("Inserted {inserts} mails from {file_path}");
+                        if inserts > 0 { info!("Inserted {inserts} mails from {file_path}") };
                     }
                     Err(why) => error!("Encountered error {why} while parsing mail log from tailing: {file_path}"),
                 }

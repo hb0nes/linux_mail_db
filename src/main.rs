@@ -43,8 +43,7 @@ async fn main() -> Result<()> {
     tasks.spawn(start_http());
     tasks.spawn(init_mail());
     tasks.spawn(tail_mail_log());
-    #[allow(clippy::identity_op)]
-    tasks.spawn(tail_mail(Duration::from_secs(0 + &Config::global().mail_parsing_delay)));
+    tasks.spawn(tail_mail(Duration::from_secs(Config::global().mail_parsing_delay)));
     loop {
         select! {
             _ = tokio::signal::ctrl_c() => {
