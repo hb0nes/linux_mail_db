@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, format_err};
 use log::error;
-use notify::{Config, Event, EventKind, FsEventWatcher, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use notify::event::{CreateKind, DataChange, MetadataKind, ModifyKind, RemoveKind, RenameMode};
 use tokio::sync::mpsc;
 
@@ -15,7 +15,7 @@ pub struct FileTail {
     file_path: PathBuf,
     rx_fs_events: mpsc::UnboundedReceiver<notify::Result<Event>>,
     #[allow(dead_code)]
-    watcher: FsEventWatcher,
+    watcher: RecommendedWatcher,
     tx_lines: mpsc::Sender<FileLines>,
 }
 
@@ -25,7 +25,7 @@ impl FileTail {
         let pos = file.metadata()?.len();
         let (tx_lines, rx_lines) = mpsc::channel::<FileLines>(5);
         let (tx_watcher, rx_fs_events) = mpsc::unbounded_channel();
-        let mut watcher = RecommendedWatcher::new(move |res| {
+        let mut watcher: RecommendedWatcher = RecommendedWatcher::new(move |res| {
             tx_watcher.send(res).unwrap();
         }, Config::default())?;
         watcher.watch(file_path, RecursiveMode::NonRecursive)?;
