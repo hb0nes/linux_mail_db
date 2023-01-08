@@ -68,15 +68,18 @@ impl FileTail {
                 }
                 // File was modified.
                 // Read file from last known position to read new changes.
-                if let EventKind::Modify(ModifyKind::Data(DataChange::Content)) = e.kind {
-                    // If currently opened file cannot be queried for metadata, something must've happened to it.
-                    // Reset position and reopen file.
-                    let mut file = File::open(&self.file_path).ok()?;
-                    let file_size = file.metadata().ok()?.len();
-                    file.seek(SeekFrom::Start(self.pos)).ok()?;
-                    let reader = FileLines::from(file);
-                    self.pos = file_size;
-                    return Some(reader);
+                match e.kind {
+                    EventKind::Modify(ModifyKind::Data(DataChange::Content)) | EventKind::Modify(ModifyKind::Data(DataChange::Any)) => {
+                        // If currently opened file cannot be queried for metadata, something must've happened to it.
+                        // Reset position and reopen file.
+                        let mut file = File::open(&self.file_path).ok()?;
+                        let file_size = file.metadata().ok()?.len();
+                        file.seek(SeekFrom::Start(self.pos)).ok()?;
+                        let reader = FileLines::from(file);
+                        self.pos = file_size;
+                        return Some(reader);
+                    }
+                    _ => {}
                 }
             }
             Err(why) => error!("{:?}", why)
