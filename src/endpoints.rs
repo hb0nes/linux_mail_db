@@ -5,7 +5,6 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use crate::mail::{Mail, MAIL_DB};
 
-
 #[derive(Debug, Deserialize)]
 pub struct FindMailQuery {
     email_address_filter: String,
@@ -29,6 +28,10 @@ pub async fn find_mail(query: Query<FindMailQuery>) -> axum::response::Result<Js
                     None => false,
                 });
             }
+            (k, v)
+        })
+        .map(|(k, mut v)| {
+            v.sort_by(|a, b| { a.line.cmp(&b.line) });
             (k, v)
         })
         .filter(|(_, v)| !v.is_empty())
