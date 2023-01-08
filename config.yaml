@@ -1,0 +1,23 @@
+listen:
+  ip: 0.0.0.0
+  port: 8080
+log:
+  dir: /var/log
+  files:
+    - mail.info
+    - mail.info.1
+    - mail.info.2.gz
+    - mail.info.3.gz
+    - mail.info.4.gz
+  tail: mail.info
+mail:
+  dir: /var/mail
+  files:
+    - root
+    - root.1.gz
+    - root.2.gz
+    - root.3.gz
+    - root.4.gz
+    - root.5.gz
+  tail: root
+
