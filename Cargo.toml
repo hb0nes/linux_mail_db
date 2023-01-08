@@ -26,4 +26,3 @@ once_cell = "1.17.0"
 lto = true
 codegen-units = 1
 panic = "abort"
-jemalloc = false
