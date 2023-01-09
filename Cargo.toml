@@ -9,6 +9,7 @@ edition = "2021"
 log = "0.4.17"
 env_logger = "0.10.0"
 axum = "0.6.1"
+axum-server = { version = "0.4.4", features = ["tls-rustls"] }
 tower-http = { version = "0.3.5", features = ["cors"] }
 anyhow = "1.0.68"
 thiserror = "1.0.38"

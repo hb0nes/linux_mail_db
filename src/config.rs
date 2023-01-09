@@ -25,7 +25,14 @@ pub struct ConfigListen {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ConfigTls {
+    pub cert: String,
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Config {
+    pub tls: Option<ConfigTls>,
     pub log: ConfigLogs,
     pub mail: ConfigMails,
     pub listen: ConfigListen,

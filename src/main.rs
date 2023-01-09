@@ -1,12 +1,14 @@
 extern crate core;
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
 use axum::routing::get;
 use tower_http::cors::CorsLayer;
 use axum::Router;
+use axum_server::tls_rustls::RustlsConfig;
 use env_logger::Env;
 use log::{error, info};
 use once_cell::sync::OnceCell;
@@ -31,14 +33,27 @@ async fn start_http() -> Result<String> {
         "{}:{}",
         Config::global().listen.ip,
         Config::global().listen.port,
-    )
-        .parse()?;
-    info!("Server listening on {}", socket_addr);
+    ).parse()?;
+
     let cors = CorsLayer::new().allow_origin(cors::AllowOrigin::any());
     let app = Router::new().route("/find_mail", get(find_mail)).layer(cors);
-    axum::Server::bind(&socket_addr)
-        .serve(app.into_make_service())
-        .await?;
+    info!("Server listening on {}", socket_addr);
+    match &Config::global().tls {
+        Some(c) => {
+            let rustls_config = RustlsConfig::from_pem_file(
+                PathBuf::from(&c.cert),
+                PathBuf::from(&c.key),
+            ).await?;
+            axum_server::bind_rustls(socket_addr, rustls_config)
+                .serve(app.into_make_service())
+                .await?
+        }
+        None => {
+            axum::Server::bind(&socket_addr)
+                .serve(app.into_make_service())
+                .await?;
+        }
+    }
     Ok(String::from("HTTP server stopped"))
 }
 

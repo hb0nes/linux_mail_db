@@ -1,3 +1,7 @@
+# TLS is optional. Server will run in plain HTTP without tls config.
+tls:
+  cert: ./fullchain.pem
+  key: ./privkey.pem
 listen:
   ip: 0.0.0.0
   port: 8080
