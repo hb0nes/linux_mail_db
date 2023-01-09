@@ -4,34 +4,41 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::Result;
-use axum::Router;
 use axum::routing::get;
+use tower_http::cors::CorsLayer;
+use axum::Router;
 use env_logger::Env;
 use log::{error, info};
 use once_cell::sync::OnceCell;
 use tokio::select;
 use tokio::task::JoinSet;
-
-use crate::config::{Config, read_config};
+use tower_http::cors;
+use crate::config::{read_config, Config};
 use crate::endpoints::find_mail;
 use crate::mail::{init_mail, tail_mail, tail_mail_log};
 use crate::tail::FileTail;
 
+mod config;
 mod endpoints;
 mod mail;
 mod tail;
-mod config;
 
 pub(crate) static CONFIG: OnceCell<Config> = OnceCell::new();
 
 /// Start the API to query for mails and subjects
 async fn start_http() -> Result<String> {
-    let socket_addr: SocketAddr = format!("{}:{}", Config::global().listen.ip, Config::global().listen.port, ).parse()?;
+    let socket_addr: SocketAddr = format!(
+        "{}:{}",
+        Config::global().listen.ip,
+        Config::global().listen.port,
+    )
+        .parse()?;
     info!("Server listening on {}", socket_addr);
-    let app = Router::new()
-        .route("/find_mail", get(find_mail));
+    let cors = CorsLayer::new().allow_origin(cors::AllowOrigin::any());
+    let app = Router::new().route("/find_mail", get(find_mail)).layer(cors);
     axum::Server::bind(&socket_addr)
-        .serve(app.into_make_service()).await?;
+        .serve(app.into_make_service())
+        .await?;
     Ok(String::from("HTTP server stopped"))
 }
 
@@ -43,14 +50,16 @@ async fn main() -> Result<()> {
     tasks.spawn(start_http());
     tasks.spawn(init_mail());
     tasks.spawn(tail_mail_log());
-    tasks.spawn(tail_mail(Duration::from_secs(Config::global().mail_parsing_delay)));
+    tasks.spawn(tail_mail(Duration::from_secs(
+        Config::global().mail_parsing_delay,
+    )));
     loop {
         select! {
             _ = tokio::signal::ctrl_c() => {
                     info!("CTRL + C received. Shutting down all tasks.");
                     tasks.shutdown().await;
                     return Ok(())
-                },
+            },
             res = tasks.join_next() => {
                 let res = res.unwrap()?;
                 match res {
