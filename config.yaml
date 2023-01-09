@@ -2,7 +2,7 @@ listen:
   ip: 0.0.0.0
   port: 8080
 log:
-  dir: ./test_data/log
+  dir: /log
   files:
     - mail.info
     - mail.info.1
@@ -11,7 +11,7 @@ log:
     - mail.info.4.gz
   tail: mail.info
 mail:
-  dir: ./test_data/mail
+  dir: /mail
   files:
     - root
     - root.1.gz
