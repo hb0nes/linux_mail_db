@@ -34,7 +34,6 @@ async fn start_http() -> Result<String> {
         Config::global().listen.ip,
         Config::global().listen.port,
     ).parse()?;
-
     let cors = CorsLayer::new().allow_origin(cors::AllowOrigin::any());
     let app = Router::new().route("/find_mail", get(find_mail)).layer(cors);
     info!("Server listening on {}", socket_addr);

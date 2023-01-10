@@ -151,7 +151,7 @@ pub fn parse_mails(mut reader: FileLines) -> Result<Vec<Mail>> {
     let mut mails: Vec<Mail> = vec![];
     let (mut email, mut id) = (String::new(), String::new());
     for line in reader.by_ref() {
-        let line = line?;
+        let line = line.with_context(|| "while reading line from FileLines")?;
         if !line.contains("postfix/smtp[") {
             continue;
         }
@@ -202,7 +202,7 @@ pub fn parse_mail_subjects(mut reader: FileLines) -> Result<Vec<Mail>> {
     let mut mails_with_subjects: Vec<Mail> = vec![];
     let mut parse_mail = false;
     for line in reader.by_ref() {
-        let line = line?;
+        let line = line.with_context(|| "while reading line from FileLines")?;
 
         // "ESMTPS id" should indicate the start of an email, so start parsing the mail
         if !parse_mail && line.contains("ESMTPS id") {
@@ -271,7 +271,7 @@ pub async fn tail_mail(delay: Duration) -> Result<String> {
                             if updates > 0 { info!("Updated {updates} subjects from {file_path}") };
                         });
                     }
-                    Err(why) => error!("Encountered error {why} while parsing mail subjects from tailing: {file_path}"),
+                    Err(why) => error!("Encountered error: '{why}' while tailing: {file_path}"),
                 }
             }
         });
@@ -297,7 +297,7 @@ pub async fn tail_mail_log() -> Result<String> {
                         let inserts = MAIL_DB.insert_mails(mails);
                         if inserts > 0 { info!("Inserted {inserts} mails from {file_path}") };
                     }
-                    Err(why) => error!("Encountered error {why} while parsing mail log from tailing: {file_path}"),
+                    Err(why) => error!("Encountered error: '{why}' while tailing: {file_path}"),
                 }
             }
         });
