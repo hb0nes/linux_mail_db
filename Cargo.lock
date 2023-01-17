@@ -510,7 +510,6 @@ dependencies = [
  "notify-debouncer-mini",
  "once_cell",
  "parking_lot",
- "regex",
  "rustc-hash",
  "serde",
  "serde_yaml",

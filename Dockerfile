@@ -4,6 +4,8 @@ FROM rust:bullseye AS build
 COPY . /src/
 WORKDIR /src
 
+RUN rustup override set nightly
+
 RUN --mount=type=cache,target=/usr/local/cargo/registry <<EOF
 	set -e
 	cargo build --release

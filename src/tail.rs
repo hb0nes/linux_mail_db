@@ -1,14 +1,40 @@
 use std::fs::File;
+use std::io;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, format_err};
-use log::error;
+use log::{debug, error, info, warn};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use notify::event::{CreateKind, DataChange, MetadataKind, ModifyKind, RemoveKind, RenameMode};
 use tokio::sync::mpsc;
 
 use crate::mail::FileLines;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ParseEventError {
+    #[error("the event {:?} is unhandled", 0)]
+    UnhandledEvent(EventKind),
+    #[error("FileReading error occurred during event parsing: {source}", )]
+    FileReading {
+        source: anyhow::Error,
+    },
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl From<io::Error> for ParseEventError {
+    fn from(value: io::Error) -> Self {
+        ParseEventError::FileReading { source: value.into() }
+    }
+}
+
+impl From<notify::Error> for ParseEventError {
+    fn from(value: notify::Error) -> Self {
+        ParseEventError::FileReading { source: value.into() }
+    }
+}
 
 pub struct FileTail {
     pos: u64,
@@ -20,70 +46,99 @@ pub struct FileTail {
 }
 
 impl FileTail {
+    // Start watching file and reset position to the beginning of the file
+    // to read file from the start on the next Notify event
+    fn reset(&mut self) -> anyhow::Result<(), notify::Error> {
+        self.pos = 0;
+        self.watcher.watch(&self.file_path, RecursiveMode::NonRecursive)?;
+        Ok(())
+    }
+
+    // Retry tailing the file
+    async fn retry(&mut self, retries: i32, interval: Duration) -> anyhow::Result<()> {
+        for i in 0..retries {
+            tokio::time::sleep(interval).await;
+            warn!("Retry attempt {}/{}...", i+1, retries);
+            match self.reset() {
+                Ok(_) => {
+                    info!("Tailing file {} successfully.", &self.file_path.display());
+                    return Ok(());
+                }
+                Err(why) => warn!("{why}")
+            }
+        }
+        Err(format_err!("Retrying to tail file failed."))
+    }
+
+    // Open file and read lines from given position
+    fn read(&mut self) -> anyhow::Result<FileLines, io::Error> {
+        let mut file = File::open(&self.file_path)?;
+        let file_size = file.metadata()?.len();
+        file.seek(SeekFrom::Start(self.pos))?;
+        let reader = FileLines::from(file);
+        self.pos = file_size;
+        Ok(reader)
+    }
+
     pub fn new(file_path: &PathBuf) -> anyhow::Result<(Self, mpsc::Receiver<FileLines>)> {
         let file = File::open(file_path).with_context(|| "when creating new FileTail")?;
         let pos = file.metadata()?.len();
-        let (tx_lines, rx_lines) = mpsc::channel::<FileLines>(5);
-        let (tx_watcher, rx_fs_events) = mpsc::unbounded_channel();
-        let mut watcher: RecommendedWatcher = RecommendedWatcher::new(move |res| {
-            tx_watcher.send(res).unwrap();
-        }, Config::default())?;
-        watcher.watch(file_path, RecursiveMode::NonRecursive)?;
         let file_path = file_path.clone();
+        let (tx_fs_events, rx_fs_events) = mpsc::unbounded_channel();
+        let (tx_lines, rx_lines) = mpsc::channel(5);
+        let mut watcher: RecommendedWatcher = RecommendedWatcher::new(move |res| {
+            tx_fs_events.send(res).unwrap()
+        }, Config::default())?;
+        watcher.watch(&file_path, RecursiveMode::NonRecursive)?;
         let file_tail = FileTail {
             pos,
             file_path,
-            tx_lines,
-            watcher,
             rx_fs_events,
+            watcher,
+            tx_lines,
         };
         Ok((file_tail, rx_lines))
     }
 
     pub async fn tail(&mut self) -> anyhow::Result<String> {
         while let Some(event) = self.rx_fs_events.recv().await {
-            let lines = self.parse_event(event);
-            if let Some(l) = lines {
-                if let Err(why) = self.tx_lines.send(l).await {
-                    return Err(format_err!("error while sending lines from FileTail event watcher: {why}"));
+            match self.parse_event(event) {
+                Ok(lines) => {
+                    if let Err(why) = self.tx_lines.send(lines).await {
+                        return Err(format_err!("error while sending lines from FileTail event watcher: {why}"));
+                    }
+                }
+                Err(why) => match why {
+                    ParseEventError::FileReading { .. } => {
+                        warn!("{}", why);
+                        self.retry(5, Duration::from_secs(5)).await?;
+                    }
+                    ParseEventError::Other(why) => warn!("Unknown event parser error occurred: {:#?}", why),
+                    ParseEventError::UnhandledEvent(kind) => debug!("unhandled event: {:?}", kind),
                 }
             }
         }
-        Ok(format!("Ended task that is tailing file: {:?}.", self.file_path))
+        Err(format_err!("Ended task that is tailing file: {:?}.", self.file_path))
     }
 
-    fn parse_event(&mut self, event: notify::Result<Event>) -> Option<FileLines> {
+    fn parse_event(&mut self, event: notify::Result<Event>) -> anyhow::Result<FileLines, ParseEventError> {
+        // dbg!(&event);
         match event {
             Ok(e) => {
-                // If file was rotated by moving, removed or freshly created, reset position to the beginning of the new file
-                match e.kind {
-                    EventKind::Modify(ModifyKind::Name(RenameMode::Any)) | EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any))
-                    | EventKind::Remove(RemoveKind::Any) | EventKind::Remove(RemoveKind::File)
-                    | EventKind::Create(CreateKind::Any) | EventKind::Create(CreateKind::File)
-                    => {
-                        self.pos = 0;
-                        return None;
-                    }
-                    _ => {}
-                }
-                // File was modified.
-                // Read file from last known position to read new changes.
-                match e.kind {
-                    EventKind::Modify(ModifyKind::Data(DataChange::Content)) | EventKind::Modify(ModifyKind::Data(DataChange::Any)) => {
-                        // If currently opened file cannot be queried for metadata, something must've happened to it.
-                        // Reset position and reopen file.
-                        let mut file = File::open(&self.file_path).ok()?;
-                        let file_size = file.metadata().ok()?.len();
-                        file.seek(SeekFrom::Start(self.pos)).ok()?;
-                        let reader = FileLines::from(file);
-                        self.pos = file_size;
-                        return Some(reader);
-                    }
-                    _ => {}
+                if e.kind.is_create() || e.kind.is_remove() {
+                    // If file was removed or created (logrotate), reset position to the beginning of the new file
+                    self.reset()?;
+                    let file_lines = self.read()?;
+                    Ok(file_lines)
+                } else if e.kind.is_modify() {
+                    // Otherwise, seek to new lines and return a buffered reader over those new lines
+                    let file_lines = self.read()?;
+                    Ok(file_lines)
+                } else {
+                    Err(ParseEventError::UnhandledEvent(e.kind))
                 }
             }
-            Err(why) => error!("{:?}", why)
+            Err(why) => Err(ParseEventError::Other(why.into())),
         }
-        None
     }
 }

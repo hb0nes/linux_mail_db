@@ -1,3 +1,6 @@
+#![feature(let_chains)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 extern crate core;
 
 use std::net::SocketAddr;
@@ -10,7 +13,7 @@ use tower_http::cors::CorsLayer;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use env_logger::Env;
-use log::{error, info};
+use log::info;
 use once_cell::sync::OnceCell;
 use tokio::select;
 use tokio::task::JoinSet;
@@ -79,12 +82,11 @@ async fn main() -> Result<()> {
                 match res {
                     Ok(val) => info!("{val}"),
                     Err(why) => {
-                        error!("{why}");
                         return Err(why);
                     }
                 }
                 if tasks.is_empty() {
-                    info!("all tasks finished");
+                    info!("All tasks finished.");
                     return Ok(())
                 }
             }
