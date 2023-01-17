@@ -21,5 +21,3 @@ docker buildx build -t linux-mail-db .
 
 ## Disclaimer
 I've made this to assist sys admins or support teams in debugging mail issues.  
-It is still early days for me when it comes to Rust, so there will be plenty of things that are suboptimal.  
-Nonetheless, it works, and it's fast.  
