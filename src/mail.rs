@@ -1,11 +1,10 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::time::Duration;
-use anyhow::{Context, Result};
+use anyhow::{Context, format_err, Result};
 use flate2::read::GzDecoder;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, MutexGuard};
 use rustc_hash::FxHashMap;
@@ -29,17 +28,19 @@ impl MailDB {
         self.0.lock()
     }
 
-    pub fn update_mail_subjects(&self, mails_with_subject: Vec<Mail>) -> i32 {
+    /// Loop through local MAIL_DB and find corresponding emails that have no subject
+    /// and update the subject accordingly
+    pub fn update_mail_subjects(&self, new_mails: Vec<Mail>) -> i32 {
         let mut hashmap_locked = self.0.lock();
         let mut updates = 0;
-        for mail_with_subject in mails_with_subject {
-            let entry = hashmap_locked.get_mut(&mail_with_subject.to);
+        for new_mail in new_mails {
+            let entry = hashmap_locked.get_mut(&new_mail.to);
             match entry {
-                None => { warn!("no email address found for inserting mail subjects: {}", &mail_with_subject.to); }
-                Some(mails) => {
-                    for mail in mails {
-                        if mail.subject.is_none() && mail.id == mail_with_subject.id {
-                            mail.subject = mail_with_subject.subject;
+                None => { warn!("no email address found for inserting mail subjects: {}", &new_mail.to); }
+                Some(db_mails) => {
+                    for db_mail in db_mails {
+                        if db_mail.subject.is_none() && db_mail.id == new_mail.id {
+                            db_mail.subject = new_mail.subject;
                             updates += 1;
                             break;
                         }
@@ -50,13 +51,15 @@ impl MailDB {
         updates
     }
 
-    pub fn insert_mails(&self, mails: Vec<Mail>) -> i32 {
+    /// inserts given mails into local MAIL_DB
+    pub fn insert_mails(&self, new_mails: Vec<Mail>) -> i32 {
         let mut updates = 0;
         let mut lock = self.0.lock();
-        for mail in mails {
-            let entry = lock.entry(mail.to.clone()).or_insert(Vec::new());
-            if !entry.iter().any(|m| m.id == mail.id) {
-                entry.push(mail.clone());
+        for new_mail in new_mails {
+            // Only update mail in MAIL_DB if a mail with an identical ID does not already exist
+            let db_mail_entry = lock.entry(new_mail.to.clone()).or_insert(Vec::new());
+            if !db_mail_entry.iter().any(|m| m.id == new_mail.id) {
+                db_mail_entry.push(new_mail.clone());
                 updates += 1;
             }
         }
@@ -73,13 +76,15 @@ pub struct Mail {
     to: String,
 }
 
-pub struct FileLines(Box<dyn Iterator<Item=Result<String, std::io::Error>> + Send>);
+type DynamicIterator = Box<dyn Iterator<Item=Result<String, std::io::Error>> + Send>;
+pub struct FileLines(DynamicIterator);
 
 impl FileLines {
-    /// Returns a lines iterator for file that either decompresses a gz file or opens a regular file
-    fn new(file_name: &str) -> Result<Self> {
-        let f = File::open(file_name).with_context(|| format!("trying to open {}", &file_name))?;
-        if file_name.contains("gz") {
+    /// Returns a line-based buffered iterator for given file,
+    /// that either decompresses a .gz file or opens a regular file
+    fn new(file_name: &PathBuf) -> Result<Self> {
+        let f = File::open(file_name).with_context(|| format!("trying to open {}", file_name.display()))?;
+        if let Some(extension) = file_name.extension() && extension == "gz" {
             Ok(FileLines(Box::new(BufReader::new(GzDecoder::new(f)).lines())))
         } else {
             Ok(FileLines(Box::new(BufReader::new(f).lines())))
@@ -93,16 +98,9 @@ impl From<File> for FileLines {
     }
 }
 
-impl Deref for FileLines {
-    type Target = Box<dyn Iterator<Item=Result<String, std::io::Error>> + Send>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for FileLines {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl FileLines {
+    pub fn into_iter(self) -> DynamicIterator {
+        self.0.into_iter()
     }
 }
 
@@ -137,20 +135,20 @@ async fn init_mail_log() -> Result<i32> {
     let mut inserts_total = 0;
     for file in files {
         task::yield_now().await; // Yield to be able to cancel this task
-        let file_path = &format!("{dir}/{file}");
-        let reader = FileLines::new(file_path).with_context(|| format!("getting reader for: {file_path}"))?;
-        info!("Loading mail logs from file: {}...", file_path);
-        let mails = parse_mails(reader).with_context(|| format!("parsing emails for: {file_path}"))?;
+        let file_path : PathBuf = [dir, file].iter().collect();
+        let reader = FileLines::new(&file_path).with_context(|| format!("getting reader for: {}", file_path.display()))?;
+        info!("Loading mail logs from file: {}...", file_path.display());
+        let mails = parse_mails(reader).with_context(|| format!("parsing emails for: {}", file_path.display()))?;
         inserts_total += MAIL_DB.insert_mails(mails);
     }
     Ok(inserts_total)
 }
 
 /// Parse mails from given FileLines reader and return them
-pub fn parse_mails(mut reader: FileLines) -> Result<Vec<Mail>> {
+pub fn parse_mails(reader: FileLines) -> Result<Vec<Mail>> {
     let mut mails: Vec<Mail> = vec![];
     let (mut email, mut id) = (String::new(), String::new());
-    for line in reader.by_ref() {
+    for line in reader.into_iter() {
         let line = line.with_context(|| "while reading line from FileLines")?;
         if !line.contains("postfix/smtp[") {
             continue;
@@ -166,7 +164,6 @@ pub fn parse_mails(mut reader: FileLines) -> Result<Vec<Mail>> {
             Some(v) => v.into(),
         };
         if !email.is_empty() && !id.is_empty() {
-            // Push mail only if there isn't already a mail with the same ID for the given email address
             mails.push(Mail {
                 to: email.clone(),
                 id: id.clone(),
@@ -184,24 +181,23 @@ async fn init_mail_subjects() -> Result<i32> {
     let mut subjects_updated = 0;
     for file in files {
         task::yield_now().await; // Yield to be able to cancel this task
-        let file_path = &format!("{dir}/{file}");
-        let reader = FileLines::new(file_path).with_context(|| format!("getting reader for {file_path}"))?;
-        info!("Loading mail subjects from file: {file_path}...");
-        let mails_with_subject = parse_mail_subjects(reader).with_context(|| format!("parsing mail subjects for {file_path}"))?;
+        let file_path : PathBuf = [dir, file].iter().collect();
+        let reader = FileLines::new(&file_path).with_context(|| format!("getting reader for {}", file_path.display()))?;
+        info!("Loading mail subjects from file: {}...", file_path.display());
+        let mails_with_subject = parse_mail_subjects(reader).with_context(|| format!("parsing mail subjects for {}", file_path.display()))?;
         subjects_updated += MAIL_DB.update_mail_subjects(mails_with_subject);
     }
     Ok(subjects_updated)
 }
 
-/// parses a MailReader (dynamic lines iterator for bufreader)
-/// to find an email ID, an email address and a subject
-/// to update the MAIL_DB if a matching email address and ID are found
-/// regex turned out to be much slower than manually performing string operations.
-pub fn parse_mail_subjects(mut reader: FileLines) -> Result<Vec<Mail>> {
+/// parses FileLines (dynamic, line-based and buffered file reader)
+/// to find an email ID, an email address and a subject.
+/// Update the MAIL_DB if a matching email address and ID are found
+pub fn parse_mail_subjects(reader: FileLines) -> Result<Vec<Mail>> {
     let (mut id, mut subject, mut to) = (String::new(), String::new(), String::new());
     let mut mails_with_subjects: Vec<Mail> = vec![];
     let mut parse_mail = false;
-    for line in reader.by_ref() {
+    for line in reader.0 {
         let line = line.with_context(|| "while reading line from FileLines")?;
 
         // "ESMTPS id" should indicate the start of an email, so start parsing the mail
@@ -251,15 +247,15 @@ pub async fn init_mail() -> Result<String> {
 /// Function needs a delay because the mail contents should be parsed some time after
 /// mails have been received to line them up to logfiles.
 pub async fn tail_mail(delay: Duration) -> Result<String> {
-    let file_path = &format!("{}/{}", &Config::global().mail.dir, &Config::global().mail.tail);
-    let (mut file_tail, mut rx_lines) = FileTail::new(&PathBuf::from(file_path))
-        .with_context(|| format!("when tailing mail log file: {file_path}"))?;
+    let file_path: PathBuf = [&Config::global().mail.dir, &Config::global().mail.tail].iter().collect();
+    let (mut file_tail, mut rx_lines) = FileTail::new(&file_path)
+        .with_context(|| format!("when tailing mail log file: {}", file_path.display()))?;
     {
         let file_path = file_path.clone();
-        info!("Tailing mail file: {file_path}...");
         tokio::spawn(async move {
+            info!("Tailing mail file: {}...", file_path.display());
             while let Some(reader) = rx_lines.recv().await {
-                let parse_res = parse_mail_subjects(reader).with_context(|| format!("parsing mail subjects for {file_path}"));
+                let parse_res = parse_mail_subjects(reader).with_context(|| format!("parsing mail subjects for {}", file_path.display()));
                 match parse_res {
                     Ok(mails_with_subjects) => {
                         // Seeing as two files are being tailed simultaneously, there is a large chance that the DB isn't updated yet
@@ -268,40 +264,40 @@ pub async fn tail_mail(delay: Duration) -> Result<String> {
                         task::spawn(async move {
                             time::sleep(delay).await;
                             let updates = MAIL_DB.update_mail_subjects(mails_with_subjects);
-                            if updates > 0 { info!("Updated {updates} subjects from {file_path}") };
+                            if updates > 0 { debug!("Updated {updates} subjects from {}", file_path.display()) };
                         });
                     }
-                    Err(why) => error!("Encountered error: '{why}' while tailing: {file_path}"),
+                    Err(why) => error!("Encountered error: '{why}' while tailing: {}", file_path.display()),
                 }
             }
         });
     }
-    file_tail.tail().await?;
-    Ok(format!("Stopped tailing mail file: {file_path}."))
+    let res = file_tail.tail().await?;
+    Err(format_err!("Stopped tailing mail file: {}. {}", file_path.display(), res))
 }
 
 /// tail the configured mail log file (usually /var/log/mail.info) and update the
 /// in memory mail database accordingly.
 pub async fn tail_mail_log() -> Result<String> {
-    let file_path = &format!("{}/{}", &Config::global().log.dir, &Config::global().log.tail);
-    let (mut file_tail, mut rx_lines) = FileTail::new(&PathBuf::from(file_path))
-        .with_context(|| format!("when tailing mail log file: {file_path}"))?;
+    let file_path: PathBuf = [&Config::global().log.dir, &Config::global().log.tail].iter().collect();
+    let (mut file_tail, mut rx_lines) = FileTail::new(&file_path)
+        .with_context(|| format!("when tailing mail log file: {}", file_path.display()))?;
     {
         let file_path = file_path.clone();
-        info!("Tailing mail logfile: {file_path}...");
         tokio::spawn(async move {
+            info!("Tailing mail logfile: {}...", file_path.display());
             while let Some(reader) = rx_lines.recv().await {
-                let parse_res = parse_mails(reader).with_context(|| format!("parsing emails for: {file_path}"));
+                let parse_res = parse_mails(reader).with_context(|| format!("parsing emails for: {}", file_path.display()));
                 match parse_res {
                     Ok(mails) => {
                         let inserts = MAIL_DB.insert_mails(mails);
-                        if inserts > 0 { info!("Inserted {inserts} mails from {file_path}") };
+                        if inserts > 0 { debug!("Inserted {inserts} mails from {}", file_path.display()) };
                     }
-                    Err(why) => error!("Encountered error: '{why}' while tailing: {file_path}"),
+                    Err(why) => error!("Encountered error: '{why}' while tailing: {}", file_path.display()),
                 }
             }
         });
     }
-    file_tail.tail().await?;
-    Ok(format!("Stopped tailing mail logfile: {file_path}."))
+    let res = file_tail.tail().await?;
+    Err(format_err!("Stopped tailing mail logfile: {}. {}", file_path.display(), res))
 }
