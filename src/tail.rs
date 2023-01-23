@@ -104,7 +104,7 @@ impl FileTail {
         while let Some(event) = self.rx_fs_events.recv().await {
             match self.parse_event(event) {
                 Ok(lines) => {
-                    if let Err(why) = self.tx_lines.send(lines).await {
+                    if let Some(l) = lines && let Err(why) = self.tx_lines.send(l).await {
                         bail!("error while sending lines from FileTail event watcher: {why}");
                     }
                 }
@@ -121,18 +121,20 @@ impl FileTail {
         bail!("Ended task that is tailing file: {:?}.", self.file_path)
     }
 
-    fn parse_event(&mut self, event: notify::Result<Event>) -> anyhow::Result<FileLines, ParseEventError> {
+    fn parse_event(&mut self, event: notify::Result<Event>) -> anyhow::Result<Option<FileLines>, ParseEventError> {
         match event {
             Ok(e) => {
                 if e.kind.is_create() || e.kind.is_remove() {
                     // If file was removed or created (logrotate), reset position to the beginning of the new file
                     self.reset()?;
                     let file_lines = self.read()?;
-                    Ok(file_lines)
+                    Ok(Some(file_lines))
                 } else if e.kind.is_modify() {
                     // Otherwise, seek to new lines and return a buffered reader over those new lines
                     let file_lines = self.read()?;
-                    Ok(file_lines)
+                    Ok(Some(file_lines))
+                } else if e.kind.is_access() {
+                    Ok(None)
                 } else {
                     Err(ParseEventError::UnhandledEvent(e.kind))
                 }
