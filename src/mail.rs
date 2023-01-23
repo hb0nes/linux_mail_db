@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::time::Duration;
 use anyhow::{bail, Context, format_err, Result};
+use bytelines::ByteLinesReader;
 use flate2::read::GzDecoder;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
@@ -76,7 +77,8 @@ pub struct Mail {
     to: String,
 }
 
-type DynamicIterator = Box<dyn Iterator<Item=Result<String, std::io::Error>> + Send>;
+type DynamicIterator = Box<dyn Iterator<Item=Result<Vec<u8>, std::io::Error>> + Send>;
+
 pub struct FileLines(DynamicIterator);
 
 impl FileLines {
@@ -85,16 +87,16 @@ impl FileLines {
     fn new(file_name: &PathBuf) -> Result<Self> {
         let f = File::open(file_name).with_context(|| format!("trying to open {}", file_name.display()))?;
         if let Some(extension) = file_name.extension() && extension == "gz" {
-            Ok(FileLines(Box::new(BufReader::new(GzDecoder::new(f)).lines())))
+            Ok(FileLines(Box::new(BufReader::new(GzDecoder::new(f)).byte_lines().into_iter())))
         } else {
-            Ok(FileLines(Box::new(BufReader::new(f).lines())))
+            Ok(FileLines(Box::new(BufReader::new(f).byte_lines().into_iter())))
         }
     }
 }
 
 impl From<File> for FileLines {
     fn from(f: File) -> Self {
-        FileLines(Box::new(BufReader::new(f).lines()))
+        FileLines(Box::new(BufReader::new(f).byte_lines().into_iter()))
     }
 }
 
@@ -135,7 +137,7 @@ async fn init_mail_log() -> Result<i32> {
     let mut inserts_total = 0;
     for file in files {
         task::yield_now().await; // Yield to be able to cancel this task
-        let file_path : PathBuf = [dir, file].iter().collect();
+        let file_path: PathBuf = [dir, file].iter().collect();
         let reader = FileLines::new(&file_path).with_context(|| format!("getting reader for: {}", file_path.display()))?;
         info!("Loading mail logs from file: {}...", file_path.display());
         let mails = parse_mails(reader).with_context(|| format!("parsing emails for: {}", file_path.display()))?;
@@ -149,7 +151,11 @@ pub fn parse_mails(reader: FileLines) -> Result<Vec<Mail>> {
     let mut mails: Vec<Mail> = vec![];
     let (mut email, mut id) = (String::new(), String::new());
     for line in reader.into_iter() {
-        let line = line.with_context(|| "while reading line from FileLines")?;
+        let bytes_line = line.with_context(|| "while reading line from FileLines")?;
+        let line = match String::from_utf8(bytes_line.clone()) {
+            Ok(l) => l,
+            Err(why) => bail!("{why:#} - original bytes: {bytes_line:?}"),
+        };
         if !line.contains("postfix/smtp[") {
             continue;
         }
@@ -181,7 +187,7 @@ async fn init_mail_subjects() -> Result<i32> {
     let mut subjects_updated = 0;
     for file in files {
         task::yield_now().await; // Yield to be able to cancel this task
-        let file_path : PathBuf = [dir, file].iter().collect();
+        let file_path: PathBuf = [dir, file].iter().collect();
         let reader = FileLines::new(&file_path).with_context(|| format!("getting reader for {}", file_path.display()))?;
         info!("Loading mail subjects from file: {}...", file_path.display());
         let mails_with_subject = parse_mail_subjects(reader).with_context(|| format!("parsing mail subjects for {}", file_path.display()))?;
@@ -198,8 +204,11 @@ pub fn parse_mail_subjects(reader: FileLines) -> Result<Vec<Mail>> {
     let mut mails_with_subjects: Vec<Mail> = vec![];
     let mut parse_mail = false;
     for line in reader.0 {
-        let line = line.with_context(|| "while reading line from FileLines")?;
-
+        let bytes_line = line.with_context(|| "while reading line from FileLines")?;
+        let line = match String::from_utf8(bytes_line.clone()) {
+            Ok(l) => l,
+            Err(why) => bail!("{why:#} - original bytes: {bytes_line:?}"),
+        };
         // "ESMTPS id" should indicate the start of an email, so start parsing the mail
         if !parse_mail && line.contains("ESMTPS id") {
             parse_mail = true;
