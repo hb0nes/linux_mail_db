@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::time::Duration;
-use anyhow::{Context, format_err, Result};
+use anyhow::{bail, Context, format_err, Result};
 use flate2::read::GzDecoder;
 use log::{debug, error, info, warn};
 use once_cell::sync::Lazy;
@@ -267,13 +267,13 @@ pub async fn tail_mail(delay: Duration) -> Result<String> {
                             if updates > 0 { debug!("Updated {updates} subjects from {}", file_path.display()) };
                         });
                     }
-                    Err(why) => error!("Encountered error: '{why}' while tailing: {}", file_path.display()),
+                    Err(why) => error!("Encountered error: '{why:?}' while tailing: {}", file_path.display()),
                 }
             }
         });
     }
     let res = file_tail.tail().await?;
-    Err(format_err!("Stopped tailing mail file: {}. {}", file_path.display(), res))
+    bail!("Stopped tailing mail file: {}. {}", file_path.display(), res)
 }
 
 /// tail the configured mail log file (usually /var/log/mail.info) and update the
@@ -293,11 +293,11 @@ pub async fn tail_mail_log() -> Result<String> {
                         let inserts = MAIL_DB.insert_mails(mails);
                         if inserts > 0 { debug!("Inserted {inserts} mails from {}", file_path.display()) };
                     }
-                    Err(why) => error!("Encountered error: '{why}' while tailing: {}", file_path.display()),
+                    Err(why) => error!("Encountered error: '{why:?}' while tailing: {}", file_path.display()),
                 }
             }
         });
     }
     let res = file_tail.tail().await?;
-    Err(format_err!("Stopped tailing mail logfile: {}. {}", file_path.display(), res))
+    bail!("Stopped tailing mail logfile: {}. {}", file_path.display(), res)
 }

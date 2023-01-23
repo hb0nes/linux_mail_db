@@ -4,7 +4,7 @@ use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Context, format_err};
+use anyhow::{bail, Context, format_err};
 use log::{debug, error, info, warn};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
@@ -67,7 +67,7 @@ impl FileTail {
                 Err(why) => warn!("{why}")
             }
         }
-        Err(format_err!("Retrying to tail file failed."))
+        bail!("Retrying to tail file failed.")
     }
 
     // Open file and read lines from given position
@@ -105,24 +105,23 @@ impl FileTail {
             match self.parse_event(event) {
                 Ok(lines) => {
                     if let Err(why) = self.tx_lines.send(lines).await {
-                        return Err(format_err!("error while sending lines from FileTail event watcher: {why}"));
+                        bail!("error while sending lines from FileTail event watcher: {why}");
                     }
                 }
                 Err(why) => match why {
                     ParseEventError::FileReading { .. } => {
-                        warn!("{}", why);
+                        warn!("{why:?}");
                         self.retry(5, Duration::from_secs(5)).await?;
                     }
-                    ParseEventError::Other(why) => warn!("Unknown event parser error occurred: {:#?}", why),
+                    ParseEventError::Other(why) => warn!("Unknown event parser error occurred: {why:?}"),
                     ParseEventError::UnhandledEvent(kind) => debug!("unhandled event: {:?}", kind),
                 }
             }
         }
-        Err(format_err!("Ended task that is tailing file: {:?}.", self.file_path))
+        bail!("Ended task that is tailing file: {:?}.", self.file_path)
     }
 
     fn parse_event(&mut self, event: notify::Result<Event>) -> anyhow::Result<FileLines, ParseEventError> {
-        // dbg!(&event);
         match event {
             Ok(e) => {
                 if e.kind.is_create() || e.kind.is_remove() {

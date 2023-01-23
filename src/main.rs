@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use axum::routing::get;
 use tower_http::cors::CorsLayer;
 use axum::Router;
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
                 match res {
                     Ok(val) => info!("{val}"),
                     Err(why) => {
-                        return Err(why);
+                        bail!(why);
                     }
                 }
                 if tasks.is_empty() {
