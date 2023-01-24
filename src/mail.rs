@@ -151,11 +151,8 @@ pub fn parse_mails(reader: FileLines) -> Result<Vec<Mail>> {
     let mut mails: Vec<Mail> = vec![];
     let (mut email, mut id) = (String::new(), String::new());
     for line in reader.into_iter() {
-        let bytes_line = line.with_context(|| "while reading line from FileLines")?;
-        let line = match String::from_utf8(bytes_line.clone()) {
-            Ok(l) => l,
-            Err(why) => bail!("{why:#} - original bytes: {bytes_line:?}"),
-        };
+        let bytes: &[u8] = &line.with_context(|| "while reading line from FileLines")?;
+        let line = String::from_utf8_lossy(bytes);
         if !line.contains("postfix/smtp[") {
             continue;
         }
@@ -174,7 +171,7 @@ pub fn parse_mails(reader: FileLines) -> Result<Vec<Mail>> {
                 to: email.clone(),
                 id: id.clone(),
                 subject: None,
-                line: Some(line),
+                line: Some(line.to_string()),
             });
         }
     }
@@ -204,11 +201,8 @@ pub fn parse_mail_subjects(reader: FileLines) -> Result<Vec<Mail>> {
     let mut mails_with_subjects: Vec<Mail> = vec![];
     let mut parse_mail = false;
     for line in reader.0 {
-        let bytes_line = line.with_context(|| "while reading line from FileLines")?;
-        let line = match String::from_utf8(bytes_line.clone()) {
-            Ok(l) => l,
-            Err(why) => bail!("{why:#} - original bytes: {bytes_line:?}"),
-        };
+        let bytes: &[u8] = &line.with_context(|| "while reading line from FileLines")?;
+        let line = String::from_utf8_lossy(bytes);
         // "ESMTPS id" should indicate the start of an email, so start parsing the mail
         if !parse_mail && line.contains("ESMTPS id") {
             parse_mail = true;
