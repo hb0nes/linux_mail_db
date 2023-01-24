@@ -78,7 +78,6 @@ pub struct Mail {
 }
 
 type DynamicIterator = Box<dyn Iterator<Item=Result<Vec<u8>, std::io::Error>> + Send>;
-
 pub struct FileLines(DynamicIterator);
 
 impl FileLines {

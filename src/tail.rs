@@ -142,4 +142,3 @@ impl FileTail {
             Err(why) => Err(ParseEventError::Other(why.into())),
         }
     }
-}
