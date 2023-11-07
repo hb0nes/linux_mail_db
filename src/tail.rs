@@ -4,7 +4,7 @@ use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{bail, format_err, Context};
+use anyhow::{bail, Context};
 use log::{debug, error, info, warn};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;

@@ -1,6 +1,5 @@
-use std::ffi::OsStr;
 use crate::{Config, FileTail};
-use anyhow::{bail, format_err, Context, Result};
+use anyhow::{bail, Context, Result};
 use bytelines::ByteLinesReader;
 use flate2::read::GzDecoder;
 use log::{debug, error, info, warn};
@@ -9,7 +8,7 @@ use parking_lot::{Mutex, MutexGuard};
 use rustc_hash::FxHashMap;
 use serde::Serialize;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::{task, time};
