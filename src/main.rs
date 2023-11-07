@@ -1,15 +1,15 @@
-#![feature(let_chains)]
-#![feature(error_generic_member_access)]
-#![feature(provide_any)]
 extern crate core;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::config::{read_config, Config};
+use crate::endpoints::find_mail;
+use crate::mail::{init_mail, tail_mail, tail_mail_log};
+use crate::tail::FileTail;
 use anyhow::{bail, Result};
 use axum::routing::get;
-use tower_http::cors::CorsLayer;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use env_logger::Env;
@@ -18,10 +18,7 @@ use once_cell::sync::OnceCell;
 use tokio::select;
 use tokio::task::JoinSet;
 use tower_http::cors;
-use crate::config::{read_config, Config};
-use crate::endpoints::find_mail;
-use crate::mail::{init_mail, tail_mail, tail_mail_log};
-use crate::tail::FileTail;
+use tower_http::cors::CorsLayer;
 
 mod config;
 mod endpoints;
@@ -36,16 +33,17 @@ async fn start_http() -> Result<String> {
         "{}:{}",
         Config::global().listen.ip,
         Config::global().listen.port,
-    ).parse()?;
+    )
+    .parse()?;
     let cors = CorsLayer::new().allow_origin(cors::AllowOrigin::any());
-    let app = Router::new().route("/find_mail", get(find_mail)).layer(cors);
+    let app = Router::new()
+        .route("/find_mail", get(find_mail))
+        .layer(cors);
     info!("Server listening on {}", socket_addr);
     match &Config::global().tls {
         Some(c) => {
-            let rustls_config = RustlsConfig::from_pem_file(
-                PathBuf::from(&c.cert),
-                PathBuf::from(&c.key),
-            ).await?;
+            let rustls_config =
+                RustlsConfig::from_pem_file(PathBuf::from(&c.cert), PathBuf::from(&c.key)).await?;
             axum_server::bind_rustls(socket_addr, rustls_config)
                 .serve(app.into_make_service())
                 .await?

@@ -4,7 +4,7 @@ use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{bail, Context, format_err};
+use anyhow::{bail, format_err, Context};
 use log::{debug, error, info, warn};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
@@ -16,23 +16,25 @@ use thiserror::Error;
 pub enum ParseEventError {
     #[error("the event {:?} is unhandled", 0)]
     UnhandledEvent(EventKind),
-    #[error("FileReading error occurred during event parsing: {source}", )]
-    FileReading {
-        source: anyhow::Error,
-    },
+    #[error("FileReading error occurred during event parsing: {source}")]
+    FileReading { source: anyhow::Error },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
 
 impl From<io::Error> for ParseEventError {
     fn from(value: io::Error) -> Self {
-        ParseEventError::FileReading { source: value.into() }
+        ParseEventError::FileReading {
+            source: value.into(),
+        }
     }
 }
 
 impl From<notify::Error> for ParseEventError {
     fn from(value: notify::Error) -> Self {
-        ParseEventError::FileReading { source: value.into() }
+        ParseEventError::FileReading {
+            source: value.into(),
+        }
     }
 }
 
@@ -50,7 +52,8 @@ impl FileTail {
     // to read file from the start on the next Notify event
     fn reset(&mut self) -> anyhow::Result<(), notify::Error> {
         self.pos = 0;
-        self.watcher.watch(&self.file_path, RecursiveMode::NonRecursive)?;
+        self.watcher
+            .watch(&self.file_path, RecursiveMode::NonRecursive)?;
         Ok(())
     }
 
@@ -58,13 +61,13 @@ impl FileTail {
     async fn retry(&mut self, retries: i32, interval: Duration) -> anyhow::Result<()> {
         for i in 0..retries {
             tokio::time::sleep(interval).await;
-            warn!("Retry attempt {}/{}...", i+1, retries);
+            warn!("Retry attempt {}/{}...", i + 1, retries);
             match self.reset() {
                 Ok(_) => {
                     info!("Tailing file {} successfully.", &self.file_path.display());
                     return Ok(());
                 }
-                Err(why) => warn!("{why}")
+                Err(why) => warn!("{why}"),
             }
         }
         bail!("Retrying to tail file failed.")
@@ -86,9 +89,10 @@ impl FileTail {
         let file_path = file_path.clone();
         let (tx_fs_events, rx_fs_events) = mpsc::unbounded_channel();
         let (tx_lines, rx_lines) = mpsc::channel(5);
-        let mut watcher: RecommendedWatcher = RecommendedWatcher::new(move |res| {
-            tx_fs_events.send(res).unwrap()
-        }, Config::default())?;
+        let mut watcher: RecommendedWatcher = RecommendedWatcher::new(
+            move |res| tx_fs_events.send(res).unwrap(),
+            Config::default(),
+        )?;
         watcher.watch(&file_path, RecursiveMode::NonRecursive)?;
         let file_tail = FileTail {
             pos,
@@ -104,8 +108,10 @@ impl FileTail {
         while let Some(event) = self.rx_fs_events.recv().await {
             match self.parse_event(event) {
                 Ok(lines) => {
-                    if let Some(l) = lines && let Err(why) = self.tx_lines.send(l).await {
-                        bail!("error while sending lines from FileTail event watcher: {why}");
+                    if let Some(l) = lines {
+                        if let Err(why) = self.tx_lines.send(l).await {
+                            bail!("error while sending lines from FileTail event watcher: {why}");
+                        }
                     }
                 }
                 Err(why) => match why {
@@ -121,7 +127,10 @@ impl FileTail {
         bail!("Ended task that is tailing file: {:?}.", self.file_path)
     }
 
-    fn parse_event(&mut self, event: notify::Result<Event>) -> anyhow::Result<Option<FileLines>, ParseEventError> {
+    fn parse_event(
+        &mut self,
+        event: notify::Result<Event>,
+    ) -> anyhow::Result<Option<FileLines>, ParseEventError> {
         match event {
             Ok(e) => {
                 if e.kind.is_create() || e.kind.is_remove() {
@@ -142,3 +151,4 @@ impl FileTail {
             Err(why) => Err(ParseEventError::Other(why.into())),
         }
     }
+}

@@ -1,8 +1,8 @@
-use std::fs::File;
-use std::path::PathBuf;
+use crate::CONFIG;
 use anyhow::Context;
 use serde::Deserialize;
-use crate::CONFIG;
+use std::fs::File;
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigLogs {
@@ -48,6 +48,7 @@ impl Config {
 pub fn read_config() -> anyhow::Result<Config> {
     let file_path = PathBuf::from("./config.yaml");
     let f = File::open(file_path).with_context(|| "while reading config")?;
-    let config: Config = serde_yaml::from_reader(f).with_context(|| "while reading config & deserializing")?;
+    let config: Config =
+        serde_yaml::from_reader(f).with_context(|| "while reading config & deserializing")?;
     Ok(config)
 }

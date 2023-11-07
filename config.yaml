@@ -8,20 +8,22 @@ listen:
 log:
   dir: ./test_data/log
   files:
-    - mail.info
-    - mail.info.1
-    - mail.info.2.gz
-    - mail.info.3.gz
-    - mail.info.4.gz
+#    - mail.info
+    - mail.info.zst
+#    - mail.info.1
+#    - mail.info.2.gz
+#    - mail.info.3.gz
+#    - mail.info.4.gz
   tail: mail.info
 mail:
   dir: ./test_data/mail
   files:
-    - root
-    - root.1.gz
-    - root.2.gz
-    - root.3.gz
-    - root.4.gz
-    - root.5.gz
+#    - root
+    - root.zst
+#    - root.1.gz
+#    - root.2.gz
+#    - root.3.gz
+#    - root.4.gz
+#    - root.5.gz
   tail: root
 mail_parsing_delay: 1 # seconds

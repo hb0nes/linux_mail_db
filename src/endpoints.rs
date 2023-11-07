@@ -1,11 +1,11 @@
+use crate::mail::{Mail, MAIL_DB};
 use axum::extract::Query;
 use axum::http::StatusCode;
-use axum::Json;
 use axum::response::IntoResponse;
+use axum::Json;
 use log::info;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
-use crate::mail::{Mail, MAIL_DB};
 
 #[derive(Debug, Deserialize)]
 pub struct FindMailQuery {
@@ -21,12 +21,15 @@ pub struct FindMailResponse {
     error: Option<String>,
 }
 
-
 pub async fn find_mail(query: Query<FindMailQuery>) -> impl IntoResponse {
     let mdb = MAIL_DB.lock();
     let subject_filter = query.subject_filter.clone().unwrap_or_default();
-    info!("Searching mail for {} with filter {}", query.email_address_filter, subject_filter);
-    let mail_db_results: FxHashMap<String, Vec<Mail>> = mdb.iter()
+    info!(
+        "Searching mail for {} with filter {}",
+        query.email_address_filter, subject_filter
+    );
+    let mail_db_results: FxHashMap<String, Vec<Mail>> = mdb
+        .iter()
         .filter(|(k, _)| k.contains(&query.email_address_filter))
         .map(|(k, v)| (k.clone(), v.clone()))
         .map(|(k, mut v)| {
@@ -39,21 +42,30 @@ pub async fn find_mail(query: Query<FindMailQuery>) -> impl IntoResponse {
             (k, v)
         })
         .map(|(k, mut v)| {
-            v.sort_by(|a, b| { a.line.cmp(&b.line) });
+            v.sort_by(|a, b| a.line.cmp(&b.line));
             (k, v)
         })
         .filter(|(_, v)| !v.is_empty())
         .collect();
 
     if mail_db_results.is_empty() {
-        (StatusCode::NOT_FOUND, Json(FindMailResponse {
-            results: None,
-            error: Some(format!("No mails found for query '{}' with subject filter '{}'", &query.email_address_filter, subject_filter)),
-        }))
+        (
+            StatusCode::NOT_FOUND,
+            Json(FindMailResponse {
+                results: None,
+                error: Some(format!(
+                    "No mails found for query '{}' with subject filter '{}'",
+                    &query.email_address_filter, subject_filter
+                )),
+            }),
+        )
     } else {
-        (StatusCode::OK, Json(FindMailResponse {
-            results: Some(mail_db_results),
-            error: None,
-        }))
+        (
+            StatusCode::OK,
+            Json(FindMailResponse {
+                results: Some(mail_db_results),
+                error: None,
+            }),
+        )
     }
 }
