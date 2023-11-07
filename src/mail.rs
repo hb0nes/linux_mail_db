@@ -151,8 +151,13 @@ async fn init_mail_log() -> Result<i32> {
     for file in files {
         task::yield_now().await; // Yield to be able to cancel this task
         let file_path: PathBuf = [dir, file].iter().collect();
-        let reader = FileLines::new(&file_path)
-            .with_context(|| format!("getting reader for: {}", file_path.display()))?;
+        let reader = match FileLines::new(&file_path).with_context(|| format!("getting reader for: {}", file_path.display())) {
+            Ok(r) => r,
+            Err(why) => {
+                error!("{}", why);
+                continue
+            }
+        };
         info!("Loading mail logs from file: {}...", file_path.display());
         let mails = parse_mails(reader)
             .with_context(|| format!("parsing emails for: {}", file_path.display()))?;
